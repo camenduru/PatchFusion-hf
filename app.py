@@ -212,7 +212,7 @@ As for the PatchFusion, it works on default 4k (2160x3840) resolution. All input
 
 For ControlNet, it works on default 896x896 resolution. Again, all input images will be resized to 896x896 before passing through ControlNet as default. You might be not happy because the 4K->896x896 downsampling, but limited by the GPU resource, this demo could only achieve this.
 
-We provide some tips might be helpful: (1) Try our [experimental demo](https://55510c1c829b28b9e3.gradio.live) running on a local 80G gpu. But of course, it would be expired soon (in two days maybe); (2) Clone our code repo, and look for a gpu with more than 24G memory; (3) Clone our code repo, run the depth estimation (there are another demos for depth estimation and image-to-3D), and search for another guided high-resolution image generation strategy; (3) Some kind people give this space a stronger gpu support.
+We provide some tips might be helpful: (1) Try our [experimental demo](https://55510c1c829b28b9e3.gradio.live) running on a local 80G gpu. But of course, it would be expired soon (in two days maybe); (2) Clone our code repo, and look for a gpu with more than 24G memory; (3) Clone our code repo, run the depth estimation (there are another demos for depth estimation and image-to-3D), and search for another guided high-resolution image generation strategy; (4) Some kind people give this space a stronger gpu support.
 """
 
 with gr.Blocks() as demo:
