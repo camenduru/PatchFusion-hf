@@ -4,7 +4,7 @@ trimesh==3.9.42
 h5py
 matplotlib
 numpy==1.24.1
-pytorch==1.13.1
+torch==1.13.1
 scipy==1.10.0
 torchaudio==0.13.1
 torchvision==0.14.1
