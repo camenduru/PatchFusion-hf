@@ -46,6 +46,7 @@ from ui_prediction import predict_depth
 import torch.nn.functional as F
 
 from huggingface_hub import hf_hub_download 
+import matplotlib
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -106,13 +107,52 @@ model.load_state_dict(load_state_dict(controlnet_ckp, location=DEVICE), strict=F
 model = model.to(DEVICE)
 ddim_sampler = DDIMSampler(model)
 
-# controlnet
-title = "# PatchFusion"
-description = """Official demo for **PatchFusion: An End-to-End Tile-Based Framework for High-Resolution Monocular Metric Depth Estimation**.
+def colorize_depth_maps(depth_map, min_depth=0, max_depth=0, cmap='Spectral_r', valid_mask=None):
+    """
+    Colorize depth maps.
+    """
 
-PatchFusion is a deep learning model for high-resolution metric depth estimation from a single image.
+    percentile = 0.03
+    min_depth = np.percentile(depth_map, percentile)
+    max_depth = np.percentile(depth_map, 100 - percentile)
+    
+    assert len(depth_map.shape) >= 2, "Invalid dimension"
+    
+    if isinstance(depth_map, torch.Tensor):
+        depth = depth_map.detach().clone().squeeze().numpy()
+    elif isinstance(depth_map, np.ndarray):
+        depth = depth_map.copy().squeeze()
+    # reshape to [ (B,) H, W ]
+    if depth.ndim < 3:
+        depth = depth[np.newaxis, :, :]
+    
+    # colorize
+    cm = matplotlib.colormaps[cmap]
+    depth = ((depth - min_depth) / (max_depth - min_depth)).clip(0, 1)
+    img_colored_np = cm(depth, bytes=False)[:,:,:,0:3]  # value from 0 to 1
+    img_colored_np = np.rollaxis(img_colored_np, 3, 1)
+    
+    if valid_mask is not None:
+        if isinstance(depth_map, torch.Tensor):
+            valid_mask = valid_mask.detach().numpy()
+        valid_mask = valid_mask.squeeze()  # [H, W] or [B, H, W]
+        if valid_mask.ndim < 3:
+            valid_mask = valid_mask[np.newaxis, np.newaxis, :, :]
+        else:
+            valid_mask = valid_mask[:, np.newaxis, :, :]
+        valid_mask = np.repeat(valid_mask, 3, axis=1)
+        img_colored_np[~valid_mask] = 0
+    
+    if isinstance(depth_map, torch.Tensor):
+        img_colored = torch.from_numpy(img_colored_np).float()
+    elif isinstance(depth_map, np.ndarray):
+        img_colored = img_colored_np
+    
+    return img_colored
 
-Please refer to our [paper](???) or [github](???) for more details."""
+def hack_process(path_input, path_depth=None, path_gen=None):
+    if path_depth is not None and path_gen is not None:
+        return path_input, path_depth, path_gen
 
 def rescale(A, lbound=-1, ubound=1):
     """
@@ -142,9 +182,10 @@ def process(input_image, prompt, a_prompt, n_prompt, num_samples, image_resoluti
         torch.cuda.empty_cache() 
 
         detected_map = F.interpolate(torch.from_numpy(detected_map).unsqueeze(dim=0).unsqueeze(dim=0), (image_resolution, image_resolution), mode='bicubic', align_corners=True).squeeze().numpy()
+        colored_depth = colorize_depth_maps(detected_map) * 255
 
         H, W = detected_map.shape
-        detected_map_temp = ((1 - detected_map / np.max(detected_map)) * 255)
+        detected_map_temp = ((1 - detected_map / (np.max(detected_map + 1e-3))) * 255)
         detected_map = detected_map_temp.astype("uint8")
 
         detected_map_temp = detected_map_temp[:, :, None]
@@ -184,11 +225,15 @@ def process(input_image, prompt, a_prompt, n_prompt, num_samples, image_resoluti
 
         results = [x_samples[i] for i in range(num_samples)]
 
-        return_list = [detected_map_temp] + results
+        return_list = [colored_depth] + results
         update_return_list = []
-        for r in return_list:
-            t_r = torch.from_numpy(r).unsqueeze(dim=0).permute(0, 3, 1, 2)
-            t_r = F.interpolate(t_r, (h, w), mode='bicubic', align_corners=True).squeeze().permute(1, 2, 0).numpy().astype(np.uint8)
+        for idx, r in enumerate(return_list):
+            if idx == 0:
+                t_r = torch.from_numpy(r)
+            else:
+                t_r = torch.from_numpy(r).unsqueeze(dim=0).permute(0, 3, 1, 2)
+            # t_r = F.interpolate(t_r, (h, w), mode='bicubic', align_corners=True).squeeze().permute(1, 2, 0).numpy().astype(np.uint8)
+            t_r = t_r.squeeze().permute(1, 2, 0).numpy().astype(np.uint8)
             update_return_list.append(t_r)
 
     return update_return_list
@@ -202,17 +247,13 @@ Please refer to our [project webpage](https://zhyever.github.io/patchfusion), [p
 
 # Advanced tips
 
-I know people don't like reading introductions, so you could run this demo without any extra modifications.
-
-But for people want to do some crazy things, I recommand to read the following texts to better under stand how this demo work.
-
 The overall pipeline: image --> (PatchFusion) --> depth --> (controlnet) --> generated image.
 
-As for the PatchFusion, it works on default 4k (2160x3840) resolution. All input images will be resized to 4k before passing through PatchFusion as default. It means if you have a higher resolution image, you can increase the resolution in the advanced option.
+As for the PatchFusion, it works on default 4k (2160x3840) resolution. All input images will be resized to 4k before passing through PatchFusion as default. It means if you have a higher resolution image, you might want to increase the processing resolution in the advanced option (You would also change the patch size to 1/4 image resolution). Because of the tiling strategy, our PatchFusion would not use more memory or time for even higher resolution inputs if properly setting parameters.
 
-For ControlNet, it works on default 896x896 resolution. Again, all input images will be resized to 896x896 before passing through ControlNet as default. You might be not happy because the 4K->896x896 downsampling, but limited by the GPU resource, this demo could only achieve this.
+For ControlNet, it works on default 896x896 resolution. Again, all input images will be resized to 896x896 before passing through ControlNet as default. You might be not happy because the 4K->896x896 downsampling, but limited by the GPU resource, this demo could only achieve this. This is the memory bottleneck. The output is not resized back to the image resolution for fast inference (Well... It's still so slow now... :D)
 
-We provide some tips might be helpful: (1) Try our experimental demo (see our project website) running on a local 80G gpu. But of course, it would be expired soon (in two days maybe); (2) Clone our code repo, and look for a gpu with more than 24G memory; (3) Clone our code repo, run the depth estimation (there are another demos for depth estimation and image-to-3D), and search for another guided high-resolution image generation strategy; (4) Some kind people give this space a stronger gpu support.
+We provide some tips might be helpful: (1) Try our experimental demo (see our project website) running on a local 80G gpu (you could try high-resolution generation there, like the one in our paper). But of course, it would be expired soon (in two days maybe); (2) Clone our code repo, and look for a gpu with more than 24G memory; (3) Clone our code repo, run the depth estimation (there are another demos for depth estimation and image-to-3D), and search for another guided high-resolution image generation strategy; (4) Some kind people give this space a stronger gpu support.
 """
 
 with gr.Blocks() as demo:
@@ -225,33 +266,56 @@ with gr.Blocks() as demo:
         with gr.Column():
             # input_image = gr.Image(source='upload', type="pil")
             input_image = gr.Image(label="Input Image", type='pil')
-            prompt = gr.Textbox(label="Prompt (input your description)", value='An evening scene with the Eiffel Tower, the bridge under the glow of street lamps and a twilight sky')
+            prompt = gr.Textbox(label="Prompt (input your description)", value='A cozy cottage in an oil painting, with rich textures and vibrant green foliage')
             run_button = gr.Button("Run")
-            with gr.Accordion("Advanced options", open=False):
-                # mode = gr.Radio(["P49", "R"], label="Tiling mode", info="We recommand using P49 for fast evaluation and R with 1024 patches for best visualization results, respectively", elem_id='mode', value='R'),
-                mode = gr.Radio(["P49", "R"], label="Tiling mode", info="We recommand using P49 for fast evaluation and R with 1024 patches for best visualization results, respectively", elem_id='mode', value='P49'),
-                patch_number = gr.Slider(1, 1024, label="Please decide the number of random patches (Only useful in mode=R)", step=1, value=256)
-                resolution = gr.Textbox(label="(PatchFusion) Proccessing resolution (Default 4K. Use 'x' to split height and width.)", elem_id='mode', value='2160x3840')
-                patch_size = gr.Textbox(label="(PatchFusion) Patch size (Default 1/4 of image resolution. Use 'x' to split height and width.)", elem_id='mode', value='540x960')
+            
+        depth_image = gr.Image(label="Depth Map", elem_id='img-display-output')
+        generated_image = gr.Image(label="Generated Map", elem_id='img-display-output')
 
-                num_samples = gr.Slider(label="Images", minimum=1, maximum=12, value=1, step=1)
-                image_resolution = gr.Slider(label="ControlNet image resolution (higher resolution will lead to OOM)", minimum=256, maximum=1024, value=896, step=64)
-                strength = gr.Slider(label="Control strength", minimum=0.0, maximum=2.0, value=1.0, step=0.01)
-                guess_mode = gr.Checkbox(label='Guess Mode', value=False)
-                # detect_resolution = gr.Slider(label="Depth Resolution", minimum=128, maximum=1024, value=384, step=1)
-                ddim_steps = gr.Slider(label="steps", minimum=1, maximum=100, value=20, step=1)
-                scale = gr.Slider(label="guidance scale", minimum=0.1, maximum=30.0, value=9.0, step=0.1)
-                seed = gr.Slider(label="seed", minimum=-1, maximum=2147483647, step=1, randomize=True)
-                eta = gr.Number(label="eta (DDIM)", value=0.0)
-                a_prompt = gr.Textbox(label="Added prompt", value='best quality, extremely detailed')
-                n_prompt = gr.Textbox(label="Negative prompt", value='worst quality, low quality, lose details')
-        with gr.Column():
-            # result_gallery = gr.Gallery(label='Output', show_label=False, elem_id="gallery").style(grid=2, height='auto')
-            result_gallery = gr.Gallery(label='Output', show_label=False, elem_id="gallery")
+    with gr.Row():
+        with gr.Accordion("Advanced options", open=False):
+            # mode = gr.Radio(["P49", "R"], label="Tiling mode", info="We recommand using P49 for fast evaluation and R with 1024 patches for best visualization results, respectively", elem_id='mode', value='R'),
+            mode = gr.Radio(["P49", "R"], label="Tiling mode", info="We recommand using P49 for fast evaluation and R with 1024 patches for best visualization results, respectively", elem_id='mode', value='P49'),
+            patch_number = gr.Slider(1, 1024, label="Please decide the number of random patches (Only useful in mode=R)", step=1, value=256)
+            resolution = gr.Textbox(label="(PatchFusion) Proccessing resolution (Default 4K. Use 'x' to split height and width.)", elem_id='mode', value='2160x3840')
+            patch_size = gr.Textbox(label="(PatchFusion) Patch size (Default 1/4 of image resolution. Use 'x' to split height and width.)", elem_id='mode', value='540x960')
+
+            num_samples = gr.Slider(label="Images", minimum=1, maximum=12, value=1, step=1)
+            image_resolution = gr.Slider(label="ControlNet image resolution (higher resolution will lead to OOM)", minimum=256, maximum=1024, value=896, step=64)
+            strength = gr.Slider(label="Control strength", minimum=0.0, maximum=2.0, value=1.0, step=0.01)
+            guess_mode = gr.Checkbox(label='Guess Mode', value=False)
+            # detect_resolution = gr.Slider(label="Depth Resolution", minimum=128, maximum=1024, value=384, step=1)
+            ddim_steps = gr.Slider(label="steps", minimum=1, maximum=100, value=20, step=1)
+            scale = gr.Slider(label="guidance scale", minimum=0.1, maximum=30.0, value=9.0, step=0.1)
+            seed = gr.Slider(label="seed", minimum=-1, maximum=2147483647, step=1, randomize=True)
+            eta = gr.Number(label="eta (DDIM)", value=0.0)
+            a_prompt = gr.Textbox(label="Added prompt", value='best quality, extremely detailed')
+            n_prompt = gr.Textbox(label="Negative prompt", value='worst quality, low quality, lose details')
+
     ips = [input_image, prompt, a_prompt, n_prompt, num_samples, image_resolution, ddim_steps, guess_mode, strength, scale, seed, eta, mode[0], patch_number, resolution, patch_size]
-    run_button.click(fn=process, inputs=ips, outputs=[result_gallery])
-    examples = gr.Examples(examples=["examples/example_2.jpeg", "examples/example_4.jpeg", "examples/example_5.jpeg"], inputs=[input_image])
+    run_button.click(fn=process, inputs=ips, outputs=[depth_image, generated_image])
+    examples = gr.Examples(
+        inputs=[input_image, depth_image, generated_image],
+        outputs=[input_image, depth_image, generated_image],
+        examples=[
+            [
+                "examples/example_4.jpeg",
+                "examples/2_depth.png",
+                "examples/2_gen.png",
 
+            ],
+            [
+                "examples/example_5.jpeg",
+                "examples/3_depth.png",
+                "examples/3_gen.png",
+            ],
+            [
+                "examples/example_6.png",
+                "examples/4_depth.png",
+                "examples/4_gen.png",
+            ]],
+        cache_examples=True,
+        fn=hack_process)
 
 if __name__ == '__main__':
     demo.queue().launch(share=True)
