@@ -96,7 +96,9 @@ overwrite_kwargs['model_cfg_path'] = args.model_cfg_path
 overwrite_kwargs["model"] = args.model
 config_depth = get_config_user(args.model, **overwrite_kwargs)
 config_depth["pretrained_resource"] = ''
-
+depth_model = build_model(config_depth)
+depth_model = load_ckpt(depth_model, args.ckp_path)
+depth_model.eval()
 
 controlnet_ckp = hf_hub_download(repo_id="zhyever/PatchFusion", filename="control_sd15_depth.pth")
 model = create_model('./ControlNet/models/cldm_v15.yaml')
@@ -132,14 +134,10 @@ def process(input_image, prompt, a_prompt, n_prompt, num_samples, image_resoluti
     with torch.no_grad():
         w, h = input_image.size
 
-        depth_model = build_model(config_depth)
-        depth_model = load_ckpt(depth_model, args.ckp_path)
-        depth_model.eval()
         depth_model.to(DEVICE)
-
         detected_map = predict_depth(depth_model, input_image, mode, patch_number, resolution, patch_size, device=DEVICE)
 
-        del depth_model # after using the depth model, free the mem
+        depth_model.cpu() # free some mem
         gc.collect()
         torch.cuda.empty_cache() 
 
