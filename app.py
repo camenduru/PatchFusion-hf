@@ -22,6 +22,7 @@
 
 # File author: Zhenyu Li
 
+import gc
 from ControlNet.share import *
 import einops
 import torch
@@ -107,7 +108,6 @@ model.load_state_dict(load_state_dict(controlnet_ckp, location=DEVICE), strict=F
 model = model.to(DEVICE)
 ddim_sampler = DDIMSampler(model)
 
-
 # controlnet
 title = "# PatchFusion"
 description = """Official demo for **PatchFusion: An End-to-End Tile-Based Framework for High-Resolution Monocular Metric Depth Estimation**.
@@ -136,6 +136,11 @@ def process(input_image, prompt, a_prompt, n_prompt, num_samples, image_resoluti
     with torch.no_grad():
         w, h = input_image.size
         detected_map = predict_depth(depth_model, input_image, mode, patch_number, resolution, patch_size, device=DEVICE)
+
+        del depth_model # after using the depth model, free the mem
+        gc.collect()
+        torch.cuda.empty_cache() 
+
         detected_map = F.interpolate(torch.from_numpy(detected_map).unsqueeze(dim=0).unsqueeze(dim=0), (image_resolution, image_resolution), mode='bicubic', align_corners=True).squeeze().numpy()
 
         H, W = detected_map.shape
