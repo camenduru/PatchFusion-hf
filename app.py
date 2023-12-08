@@ -147,7 +147,7 @@ def process(input_image, prompt, a_prompt, n_prompt, num_samples, image_resoluti
         detected_map = detected_map[:, :, None]
         detected_map = np.concatenate([detected_map, detected_map, detected_map], axis=2)
         
-        control = torch.from_numpy(detected_map.copy()).float().cuda() / 255.0
+        control = torch.from_numpy(detected_map.copy()).float().to(DEVICE) / 255.0
         control = torch.stack([control for _ in range(num_samples)], dim=0)
         control = einops.rearrange(control, 'b h w c -> b c h w').clone()
 
