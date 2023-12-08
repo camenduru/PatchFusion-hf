@@ -198,7 +198,22 @@ description = """Official demo for **PatchFusion: An End-to-End Tile-Based Frame
 
 PatchFusion is a deep learning model for high-resolution metric depth estimation from a single image.
 
-Please refer to our [project webpage](https://zhyever.github.io/patchfusion), [paper](https://arxiv.org/abs/2312.02284) or [github](https://github.com/zhyever/PatchFusion) for more details."""
+Please refer to our [project webpage](https://zhyever.github.io/patchfusion), [paper](https://arxiv.org/abs/2312.02284) or [github](https://github.com/zhyever/PatchFusion) for more details.
+
+# Advanced tips
+
+I know people don't like reading introductions, so you could run this demo without any extra modifications.
+
+But for people want to do some crazy things, I recommand to read the following texts to better under stand how this demo work.
+
+The overall pipeline: image --> (PatchFusion) --> depth --> (controlnet) --> generated image.
+
+As for the PatchFusion, it works on default 4k (2160x3840) resolution. All input images will be resized to 4k before passing through PatchFusion as default. It means if you have a higher resolution image, you can increase the resolution in the advanced option.
+
+For ControlNet, it works on default 896x896 resolution. Again, all input images will be resized to 896x896 before passing through ControlNet as default. You might be not happy because the 4K->896x896 downsampling, but limited by the GPU resource, this demo could only achieve this.
+
+We provide some tips might be helpful: (1) Try our [experimental demo](https://55510c1c829b28b9e3.gradio.live) running on a local 80G gpu. But of course, it would be expired soon (in two days maybe); (2) Clone our code repo, and look for a gpu with more than 24G memory; (3) Clone our code repo, run the depth estimation (there are another demos for depth estimation and image-to-3D), and search for another guided high-resolution image generation strategy; (3) Some kind people give this space a stronger gpu support.
+"""
 
 with gr.Blocks() as demo:
     gr.Markdown(title)
@@ -216,8 +231,8 @@ with gr.Blocks() as demo:
                 # mode = gr.Radio(["P49", "R"], label="Tiling mode", info="We recommand using P49 for fast evaluation and R with 1024 patches for best visualization results, respectively", elem_id='mode', value='R'),
                 mode = gr.Radio(["P49", "R"], label="Tiling mode", info="We recommand using P49 for fast evaluation and R with 1024 patches for best visualization results, respectively", elem_id='mode', value='P49'),
                 patch_number = gr.Slider(1, 1024, label="Please decide the number of random patches (Only useful in mode=R)", step=1, value=256)
-                resolution = gr.Textbox(label="PatchFusion proccessing resolution (Default 4K. Use 'x' to split height and width.)", elem_id='mode', value='2160x3840')
-                patch_size = gr.Textbox(label="Patch size (Default 1/4 of image resolution. Use 'x' to split height and width.)", elem_id='mode', value='540x960')
+                resolution = gr.Textbox(label="(PatchFusion) Proccessing resolution (Default 4K. Use 'x' to split height and width.)", elem_id='mode', value='2160x3840')
+                patch_size = gr.Textbox(label="(PatchFusion) Patch size (Default 1/4 of image resolution. Use 'x' to split height and width.)", elem_id='mode', value='540x960')
 
                 num_samples = gr.Slider(label="Images", minimum=1, maximum=12, value=1, step=1)
                 image_resolution = gr.Slider(label="ControlNet image resolution (higher resolution will lead to OOM)", minimum=256, maximum=1024, value=896, step=64)
