@@ -193,7 +193,7 @@ description = """Official demo for **PatchFusion: An End-to-End Tile-Based Frame
 
 PatchFusion is a deep learning model for high-resolution metric depth estimation from a single image.
 
-Please refer to our [paper](https://arxiv.org/abs/2312.02284) or [github](https://github.com/zhyever/PatchFusion) for more details."""
+Please refer to our [project webpage](https://zhyever.github.io/patchfusion), [paper](https://arxiv.org/abs/2312.02284) or [github](https://github.com/zhyever/PatchFusion) for more details."""
 
 with gr.Blocks() as demo:
     gr.Markdown(title)
