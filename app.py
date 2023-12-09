@@ -197,12 +197,12 @@ def rescale(A, lbound=-1, ubound=1):
     A_max = np.max(A)
     return (ubound - lbound) * (A - A_min) / (A_max - A_min) + lbound
 
-def process(input_image, prompt, a_prompt, n_prompt, num_samples, image_resolution, ddim_steps, guess_mode, strength, scale, seed, eta, mode, patch_number, resolution, patch_size, color_map):
+def process(input_image, prompt, a_prompt, n_prompt, num_samples, image_resolution, ddim_steps, guess_mode, strength, scale, seed, eta, mode, patch_number, resolution_h, resolution_w, patch_size_h, patch_size_w, color_map):
     with torch.no_grad():
         w, h = input_image.size
 
         depth_model.to(DEVICE)
-        detected_map = predict_depth(depth_model, input_image, mode, patch_number, resolution, patch_size, device=DEVICE)
+        detected_map = predict_depth(depth_model, input_image, mode, patch_number, [resolution_h, resolution_w], [patch_size_h, patch_size_w], device=DEVICE)
         detected_map_save = copy.deepcopy(detected_map)
         tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
         detected_map_save = Image.fromarray((detected_map_save*256).astype('uint16'))
@@ -285,7 +285,7 @@ Please refer to our [project webpage](https://zhyever.github.io/patchfusion), [p
 
 The overall pipeline: image --> (PatchFusion) --> depth --> (controlnet) --> generated image.
 
-As for the PatchFusion, it works on default 4k (2160x3840) resolution. All input images will be resized to 4k before passing through PatchFusion as default. It means if you have a higher resolution image, you might want to increase the processing resolution in the advanced option (You would also change the patch size to 1/4 image resolution). Because of the tiling strategy, our PatchFusion would not use more memory or time for even higher resolution inputs if properly setting parameters. 
+As for the PatchFusion, it works on default 4k (2160x3840) resolution. All input images will be resized to 4k before passing through PatchFusion as default. It means if you have a higher resolution image, you might want to increase the processing resolution in the advanced option (You would also change the patch size to 1/4 image resolution!). Because of the tiling strategy, our PatchFusion would not use more memory or time for even higher resolution inputs if properly setting parameters. 
 
 The output depth map is resized to the original image resolution. Download for better visualization quality. 16-Bit Raw Depth = (pred_depth * 256).to(uint16).
 
@@ -294,6 +294,8 @@ We provide two color maps to render depth map, which are magma (more common in s
 For ControlNet, it works on default 896x896 resolution. Again, all input images will be resized to 896x896 before passing through ControlNet as default. You might be not happy because the 4K->896x896 downsampling, but limited by the GPU resource, this demo could only achieve this. This is the memory bottleneck. The output is not resized back to the image resolution for fast inference (Well... It's still so slow now... :D).
 
 We provide some tips might be helpful: (1) Try our experimental demo (check our github) running on a local 80G gpu (you could try high-resolution generation there, like the one in our paper). But of course, it would be expired soon (in two days maybe); (2) Clone our code repo, and look for a gpu with more than 24G memory; (3) Clone our code repo, run the depth estimation (there are another demos for depth estimation and image-to-3D), and search for another guided high-resolution image generation strategy; (4) Some kind people give this space a stronger gpu support.
+
+Event not found ERROR: It seems the queue would be busy if many users upload their high-resolution images at the same time. One solution could be here: https://github.com/gradio-app/gradio/pull/6556, and we will fix this when it's merged.
 """
 
 with gr.Blocks() as demo:
@@ -306,23 +308,29 @@ with gr.Blocks() as demo:
     with gr.Row():
         with gr.Accordion("Advanced options", open=False):
             # mode = gr.Radio(["P49", "R"], label="Tiling mode", info="We recommand using P49 for fast evaluation and R with 1024 patches for best visualization results, respectively", elem_id='mode', value='R')
-            mode = gr.Radio(["P49", "R"], label="Tiling mode", info="We recommand using P49 for fast evaluation and R with 1024 patches for best visualization results, respectively", elem_id='mode', value='P49')
-            patch_number = gr.Slider(1, 1024, label="Please decide the number of random patches (Only useful in mode=R)", step=1, value=256)
-            resolution = gr.Textbox(label="(PatchFusion) Proccessing resolution (Default 4K. Use 'x' to split height and width.)", elem_id='mode', value='2160x3840')
-            patch_size = gr.Textbox(label="(PatchFusion) Patch size (Default 1/4 of image resolution. Use 'x' to split height and width.)", elem_id='mode', value='540x960')
-            color_map = gr.Radio(["magma", "spectral"], label="Colormap used to render depth map", elem_id='mode', value='magma')
+            mode = gr.Radio(["P49", "R"], label="(PatchFusion) Tiling mode", info="We recommand using P49 for fast evaluation and R with 256 patches for best visualization results, respectively", elem_id='mode', value='P49')
+            patch_number = gr.Slider(1, 256, label="(PatchFusion) Please decide the number of random patches (Only useful in mode=R)", step=1, value=256)
+            # resolution = gr.Textbox(label="(PatchFusion) Proccessing resolution (Default 4K. Use 'x' to split height and width.)", elem_id='mode', value='2160x3840')
+            # patch_size = gr.Textbox(label="(PatchFusion) Patch size (Default 1/4 of image resolution. Use 'x' to split height and width.)", elem_id='mode', value='540x960')
+            resolution_h = gr.Slider(label="(PatchFusion) Proccessing resolution height (Default 4K, 2160)", minimum=256, maximum=2700, value=2160, step=1)
+            resolution_w = gr.Slider(label="(PatchFusion) Proccessing resolution width (Default 4K, 3840)", minimum=256, maximum=4800, value=3840, step=1)
+            patch_size_h = gr.Slider(label="(PatchFusion) Patch size height (Default 4K x 1/4, 540)", minimum=256, maximum=675, value=540, step=1)
+            patch_size_w = gr.Slider(label="(PatchFusion) Patch size width (Default 4K x 1/4, 960)", minimum=256, maximum=1200, value=960, step=1)
+        
+            color_map = gr.Radio(["magma", "spectral"], label="(PatchFusion) Colormap used to render depth map", elem_id='mode', value='magma')
 
-            num_samples = gr.Slider(label="Images", minimum=1, maximum=12, value=1, step=1)
-            image_resolution = gr.Slider(label="ControlNet image resolution (higher resolution will lead to OOM)", minimum=256, maximum=1024, value=896, step=64)
-            strength = gr.Slider(label="Control strength", minimum=0.0, maximum=2.0, value=1.0, step=0.01)
-            guess_mode = gr.Checkbox(label='Guess Mode', value=False)
+            # num_samples = gr.Slider(label="Images", minimum=1, maximum=12, value=1, step=1)
+            num_samples = gr.Slider(label="(ControlNet) Images", minimum=1, maximum=1, value=1, step=1)
+            image_resolution = gr.Slider(label="(ControlNet) ControlNet image resolution (higher resolution will lead to OOM)", minimum=256, maximum=896, value=896, step=64)
+            strength = gr.Slider(label="(ControlNet) Control strength", minimum=0.0, maximum=2.0, value=1.0, step=0.01)
+            guess_mode = gr.Checkbox(label='(ControlNet) Guess Mode', value=False)
             # detect_resolution = gr.Slider(label="Depth Resolution", minimum=128, maximum=1024, value=384, step=1)
-            ddim_steps = gr.Slider(label="steps", minimum=1, maximum=100, value=20, step=1)
-            scale = gr.Slider(label="guidance scale", minimum=0.1, maximum=30.0, value=9.0, step=0.1)
-            seed = gr.Slider(label="seed", minimum=-1, maximum=2147483647, step=1, randomize=True)
-            eta = gr.Number(label="eta (DDIM)", value=0.0)
-            a_prompt = gr.Textbox(label="Added prompt", value='best quality, extremely detailed')
-            n_prompt = gr.Textbox(label="Negative prompt", value='worst quality, low quality, lose details')
+            ddim_steps = gr.Slider(label="(ControlNet) steps", minimum=1, maximum=100, value=20, step=1)
+            scale = gr.Slider(label="(ControlNet) guidance scale", minimum=0.1, maximum=30.0, value=9.0, step=0.1)
+            seed = gr.Slider(label="(ControlNet) seed", minimum=-1, maximum=2147483647, step=1, randomize=True)
+            eta = gr.Number(label="(ControlNet) eta (DDIM)", value=0.0)
+            a_prompt = gr.Textbox(label="(ControlNet) Added prompt", value='best quality, extremely detailed')
+            n_prompt = gr.Textbox(label="(ControlNet) Negative prompt", value='worst quality, low quality, lose details')
 
     with gr.Row():
         with gr.Column():
@@ -338,7 +346,7 @@ with gr.Blocks() as demo:
     with gr.Row():
         raw_file = gr.File(label="16-Bit Raw Depth, Multiplier:256")
 
-    ips = [input_image, prompt, a_prompt, n_prompt, num_samples, image_resolution, ddim_steps, guess_mode, strength, scale, seed, eta, mode, patch_number, resolution, patch_size, color_map]
+    ips = [input_image, prompt, a_prompt, n_prompt, num_samples, image_resolution, ddim_steps, guess_mode, strength, scale, seed, eta, mode, patch_number, resolution_h, resolution_w, patch_size_h, patch_size_w, color_map]
     run_button.click(fn=process, inputs=ips, outputs=[depth_image, generated_image, raw_file])
     examples = gr.Examples(
         inputs=[input_image, depth_image, generated_image],

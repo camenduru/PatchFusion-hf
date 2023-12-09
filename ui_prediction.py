@@ -133,19 +133,20 @@ def predict_depth(model, image, mode, pn, reso, ps, device=None):
         
     image_height, image_width = image.shape[-2], image.shape[-1]
 
-    if reso != '':
-        image_resolution = (int(reso.split('x')[0]), int(reso.split('x')[1]))
-    else:
-        image_resolution = (2160, 3840)
+    # if reso != '':
+    #     image_resolution = (int(reso.split('x')[0]), int(reso.split('x')[1]))
+    # else:
+    #     image_resolution = (2160, 3840)
+    image_resolution = reso
     image_hr = F.interpolate(image, image_resolution, mode='bicubic', align_corners=True)
     preprocess = Compose([Resize(512, 384, keep_aspect_ratio=False, ensure_multiple_of=32, resize_method="minimal")])
     image_lr = preprocess(image)
 
-    if ps != '':
-        patch_size = (int(ps.split('x')[0]), int(ps.split('x')[1]))
-    else:
-        patch_size = (int(image_resolution[0] // 4), int(image_resolution[1] // 4))
-
+    # if ps != '':
+    #     patch_size = (int(ps.split('x')[0]), int(ps.split('x')[1]))
+    # else:
+    #     patch_size = (int(image_resolution[0] // 4), int(image_resolution[1] // 4))
+    patch_size = ps
     avg_depth_map = regular_tile_param(
         model, 
         image_hr, 
