@@ -336,11 +336,6 @@ with gr.Blocks() as demo:
         outputs=[input_image, depth_image, generated_image],
         examples=[
             [
-                "examples/example_3.jpeg",
-                "examples/1_depth.png",
-                "examples/1_gen.png",
-            ],
-            [
                 "examples/example_4.jpeg",
                 "examples/2_depth.png",
                 "examples/2_gen.png",
@@ -350,7 +345,12 @@ with gr.Blocks() as demo:
                 "examples/example_6.png",
                 "examples/4_depth.png",
                 "examples/4_gen.png",
-            ]],
+            ],
+            [
+                "examples/example_3.jpeg",
+                "examples/1_depth.png",
+                "examples/1_gen.png",
+            ],],
         cache_examples=True,
         fn=hack_process)
 
