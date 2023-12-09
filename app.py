@@ -299,15 +299,15 @@ with gr.Blocks() as demo:
         outputs=[input_image, depth_image, generated_image],
         examples=[
             [
+                "examples/example_3.jpeg",
+                "examples/1_depth.png",
+                "examples/1_gen.png",
+            ],
+            [
                 "examples/example_4.jpeg",
                 "examples/2_depth.png",
                 "examples/2_gen.png",
 
-            ],
-            [
-                "examples/example_5.jpeg",
-                "examples/3_depth.png",
-                "examples/3_gen.png",
             ],
             [
                 "examples/example_6.png",
