@@ -23,6 +23,7 @@
 # File author: Zhenyu Li
 
 import gc
+import copy
 from ControlNet.share import *
 import einops
 import torch
@@ -47,6 +48,9 @@ import torch.nn.functional as F
 
 from huggingface_hub import hf_hub_download 
 import matplotlib
+
+from PIL import Image
+import tempfile
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -106,6 +110,29 @@ model = create_model('./ControlNet/models/cldm_v15.yaml')
 model.load_state_dict(load_state_dict(controlnet_ckp, location=DEVICE), strict=False)
 model = model.to(DEVICE)
 ddim_sampler = DDIMSampler(model)
+
+def colorize(value, cmap='magma_r', vmin=None, vmax=None):
+
+    percentile = 0.03
+    vmin = np.percentile(value, percentile)
+    vmax = np.percentile(value, 100 - percentile)
+
+    if vmin != vmax:
+        value = (value - vmin) / (vmax - vmin)  # vmin..vmax
+    else:
+        value = value * 0.
+
+    cmapper = matplotlib.cm.get_cmap(cmap)
+    value = cmapper(value, bytes=True)  # ((1)xhxwx4)
+
+    value = value[:, :, :3] # bgr -> rgb
+    # rgb_value = value[..., ::-1]
+    rgb_value = value
+
+    rgb_value = np.transpose(rgb_value, (2, 0, 1))
+    rgb_value = rgb_value[np.newaxis, ...]
+
+    return rgb_value
 
 def colorize_depth_maps(depth_map, min_depth=0, max_depth=0, cmap='Spectral_r', valid_mask=None):
     """
@@ -176,13 +203,18 @@ def process(input_image, prompt, a_prompt, n_prompt, num_samples, image_resoluti
 
         depth_model.to(DEVICE)
         detected_map = predict_depth(depth_model, input_image, mode, patch_number, resolution, patch_size, device=DEVICE)
+        detected_map_save = copy.deepcopy(detected_map)
+        tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+        detected_map_save = Image.fromarray((detected_map_save*256).astype('uint16'))
+        detected_map_save.save(tmp.name)
 
         depth_model.cpu() # free some mem
         gc.collect()
         torch.cuda.empty_cache() 
 
+        # colored_depth = colorize_depth_maps(detected_map) * 255
+        colored_depth = colorize(detected_map)
         detected_map = F.interpolate(torch.from_numpy(detected_map).unsqueeze(dim=0).unsqueeze(dim=0), (image_resolution, image_resolution), mode='bicubic', align_corners=True).squeeze().numpy()
-        colored_depth = colorize_depth_maps(detected_map) * 255
 
         H, W = detected_map.shape
         detected_map_temp = ((1 - detected_map / (np.max(detected_map + 1e-3))) * 255)
@@ -235,6 +267,7 @@ def process(input_image, prompt, a_prompt, n_prompt, num_samples, image_resoluti
             # t_r = F.interpolate(t_r, (h, w), mode='bicubic', align_corners=True).squeeze().permute(1, 2, 0).numpy().astype(np.uint8)
             t_r = t_r.squeeze().permute(1, 2, 0).numpy().astype(np.uint8)
             update_return_list.append(t_r)
+        update_return_list.append(tmp.name)
 
     return update_return_list
 
@@ -249,9 +282,9 @@ Please refer to our [project webpage](https://zhyever.github.io/patchfusion), [p
 
 The overall pipeline: image --> (PatchFusion) --> depth --> (controlnet) --> generated image.
 
-As for the PatchFusion, it works on default 4k (2160x3840) resolution. All input images will be resized to 4k before passing through PatchFusion as default. It means if you have a higher resolution image, you might want to increase the processing resolution in the advanced option (You would also change the patch size to 1/4 image resolution). Because of the tiling strategy, our PatchFusion would not use more memory or time for even higher resolution inputs if properly setting parameters.
+As for the PatchFusion, it works on default 4k (2160x3840) resolution. All input images will be resized to 4k before passing through PatchFusion as default. It means if you have a higher resolution image, you might want to increase the processing resolution in the advanced option (You would also change the patch size to 1/4 image resolution). Because of the tiling strategy, our PatchFusion would not use more memory or time for even higher resolution inputs if properly setting parameters. The output depth map is resized to the original image resolution. Download for better visualization quality. 16-Bit Raw Depth = (pred_depth * 256).to(uint16).
 
-For ControlNet, it works on default 896x896 resolution. Again, all input images will be resized to 896x896 before passing through ControlNet as default. You might be not happy because the 4K->896x896 downsampling, but limited by the GPU resource, this demo could only achieve this. This is the memory bottleneck. The output is not resized back to the image resolution for fast inference (Well... It's still so slow now... :D)
+For ControlNet, it works on default 896x896 resolution. Again, all input images will be resized to 896x896 before passing through ControlNet as default. You might be not happy because the 4K->896x896 downsampling, but limited by the GPU resource, this demo could only achieve this. This is the memory bottleneck. The output is not resized back to the image resolution for fast inference (Well... It's still so slow now... :D).
 
 We provide some tips might be helpful: (1) Try our experimental demo (see our project website) running on a local 80G gpu (you could try high-resolution generation there, like the one in our paper). But of course, it would be expired soon (in two days maybe); (2) Clone our code repo, and look for a gpu with more than 24G memory; (3) Clone our code repo, run the depth estimation (there are another demos for depth estimation and image-to-3D), and search for another guided high-resolution image generation strategy; (4) Some kind people give this space a stronger gpu support.
 """
@@ -269,8 +302,12 @@ with gr.Blocks() as demo:
             prompt = gr.Textbox(label="Prompt (input your description)", value='A cozy cottage in an oil painting, with rich textures and vibrant green foliage')
             run_button = gr.Button("Run")
             
-        depth_image = gr.Image(label="Depth Map", elem_id='img-display-output')
         generated_image = gr.Image(label="Generated Map", elem_id='img-display-output')
+
+    with gr.Row():
+        depth_image = gr.Image(label="Depth Map", elem_id='img-display-output')
+    with gr.Row():
+        raw_file = gr.File(label="16-Bit Raw Depth, Multiplier:256")
 
     with gr.Row():
         with gr.Accordion("Advanced options", open=False):
@@ -293,7 +330,7 @@ with gr.Blocks() as demo:
             n_prompt = gr.Textbox(label="Negative prompt", value='worst quality, low quality, lose details')
 
     ips = [input_image, prompt, a_prompt, n_prompt, num_samples, image_resolution, ddim_steps, guess_mode, strength, scale, seed, eta, mode[0], patch_number, resolution, patch_size]
-    run_button.click(fn=process, inputs=ips, outputs=[depth_image, generated_image])
+    run_button.click(fn=process, inputs=ips, outputs=[depth_image, generated_image, raw_file])
     examples = gr.Examples(
         inputs=[input_image, depth_image, generated_image],
         outputs=[input_image, depth_image, generated_image],
