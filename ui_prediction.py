@@ -123,7 +123,7 @@ def colorize(value, cmap='magma_r', vmin=None, vmax=None):
 
     return rgb_value
 
-def predict_depth(model, image, mode, pn, reso, ps, device=None):
+def predict_depth(model, image, mode, pn, reso, ps, device=None, preprocess=None):
 
     pil_image = image
     if device is not None:
@@ -139,7 +139,7 @@ def predict_depth(model, image, mode, pn, reso, ps, device=None):
     #     image_resolution = (2160, 3840)
     image_resolution = reso
     image_hr = F.interpolate(image, image_resolution, mode='bicubic', align_corners=True)
-    preprocess = Compose([Resize(512, 384, keep_aspect_ratio=False, ensure_multiple_of=32, resize_method="minimal")])
+    preprocess = preprocess
     image_lr = preprocess(image)
 
     # if ps != '':

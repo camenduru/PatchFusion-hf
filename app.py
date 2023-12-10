@@ -103,13 +103,17 @@ config_depth = get_config_user(args.model, **overwrite_kwargs)
 config_depth["pretrained_resource"] = ''
 depth_model = build_model(config_depth)
 depth_model = load_ckpt(depth_model, args.ckp_path)
-depth_model.eval()
+depth_model.eval().to(DEVICE)
 
 controlnet_ckp = hf_hub_download(repo_id="zhyever/PatchFusion", filename="control_sd15_depth.pth")
 model = create_model('./ControlNet/models/cldm_v15.yaml')
 model.load_state_dict(load_state_dict(controlnet_ckp, location=DEVICE), strict=False)
 model = model.to(DEVICE)
 ddim_sampler = DDIMSampler(model)
+
+from zoedepth.models.base_models.midas import Resize
+from torchvision.transforms import Compose
+preprocess = Compose([Resize(512, 384, keep_aspect_ratio=False, ensure_multiple_of=32, resize_method="minimal")])
 
 def colorize(value, cmap='magma_r', vmin=None, vmax=None):
 
@@ -201,14 +205,11 @@ def process(input_image, prompt, a_prompt, n_prompt, num_samples, image_resoluti
     with torch.no_grad():
         w, h = input_image.size
 
-        depth_model.to(DEVICE)
-        detected_map = predict_depth(depth_model, input_image, mode, patch_number, [resolution_h, resolution_w], [patch_size_h, patch_size_w], device=DEVICE)
+        detected_map = predict_depth(depth_model, input_image, mode, patch_number, [resolution_h, resolution_w], [patch_size_h, patch_size_w], device=DEVICE, preprocess=preprocess)
         detected_map_save = copy.deepcopy(detected_map)
         tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
         detected_map_save = Image.fromarray((detected_map_save*256).astype('uint16'))
         detected_map_save.save(tmp.name)
-
-        depth_model.cpu() # free some mem
         gc.collect()
         torch.cuda.empty_cache() 
 
@@ -271,7 +272,9 @@ def process(input_image, prompt, a_prompt, n_prompt, num_samples, image_resoluti
             t_r = t_r.squeeze().permute(1, 2, 0).numpy().astype(np.uint8)
             update_return_list.append(t_r)
         update_return_list.append(tmp.name)
-
+        gc.collect()
+        torch.cuda.empty_cache()
+        
     return update_return_list
 
 title = "# PatchFusion"
@@ -295,7 +298,7 @@ For ControlNet, it works on default 896x896 resolution. Again, all input images 
 
 We provide some tips might be helpful: (1) Try our experimental demo (check our github) running on a local 80G gpu (you could try high-resolution generation there, like the one in our paper). But of course, it would be expired soon (in two days maybe); (2) Clone our code repo, and look for a gpu with more than 24G memory; (3) Clone our code repo, run the depth estimation (there are another demos for depth estimation and image-to-3D), and search for another guided high-resolution image generation strategy; (4) Some kind people give this space a stronger gpu support.
 
-Event not found ERROR: It seems the queue would be busy if many users upload their high-resolution images at the same time. One solution could be here: https://github.com/gradio-app/gradio/pull/6556, and we will fix this when it's merged.
+NOTE: the overall inference time of P49 PatchFusion and 20-step diffusion is about 60s.
 """
 
 with gr.Blocks() as demo:
@@ -325,7 +328,7 @@ with gr.Blocks() as demo:
             strength = gr.Slider(label="(ControlNet) Control strength", minimum=0.0, maximum=2.0, value=1.0, step=0.01)
             guess_mode = gr.Checkbox(label='(ControlNet) Guess Mode', value=False)
             # detect_resolution = gr.Slider(label="Depth Resolution", minimum=128, maximum=1024, value=384, step=1)
-            ddim_steps = gr.Slider(label="(ControlNet) steps", minimum=1, maximum=100, value=20, step=1)
+            ddim_steps = gr.Slider(label="(ControlNet) steps", minimum=1, maximum=30, value=20, step=1)
             scale = gr.Slider(label="(ControlNet) guidance scale", minimum=0.1, maximum=30.0, value=9.0, step=0.1)
             seed = gr.Slider(label="(ControlNet) seed", minimum=-1, maximum=2147483647, step=1, randomize=True)
             eta = gr.Number(label="(ControlNet) eta (DDIM)", value=0.0)
@@ -372,4 +375,4 @@ with gr.Blocks() as demo:
         fn=hack_process)
 
 if __name__ == '__main__':
-    demo.queue().launch(share=True)
+    demo.queue().launch()
