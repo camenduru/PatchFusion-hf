@@ -371,7 +371,7 @@ with gr.Blocks() as demo:
                 "examples/1_depth.png",
                 "examples/1_gen.png",
             ],],
-        cache_examples=True,
+        cache_examples=False,
         fn=hack_process)
 
 if __name__ == '__main__':
